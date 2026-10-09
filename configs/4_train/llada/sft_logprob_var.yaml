@@ -1,0 +1,39 @@
+# LLaDA-8B-Instruct: SFT on the boxed answer + log-prob. var.
+model_name_or_path: GSAI-ML/LLaDA-8B-Instruct
+student_backend: llada
+mask_token_id: 126336
+torch_dtype: bfloat16
+attn_implementation: eager
+gradient_checkpointing: false
+use_peft: true
+lora_r: 32
+lora_dropout: 0.0
+lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+dataset: openbbq_train_10k
+max_prompt_length: 256
+max_answer_length: 64
+
+eval_split_size: 0.0
+mask_schedule: fixed
+fixed_mask_ratio: "1.0"
+
+fair_term: logprob_var
+fair_coef: 1.0
+fair_lexicon: data/lexicon/llada/regrouped/lexicon.json
+
+output_dir: ../../outputs
+run_config: llada/sft_logprob_var
+learning_rate: 4.0e-5
+per_device_train_batch_size: 4
+max_steps: 938
+seed: 1234
+logging_steps: 2
+save_steps: 100
+wandb_project: beyond-model-weights
+
+# Settings left at dOPSD's defaults, listed for reference:
+# lora_alpha: 32
+# sampling_eps: 0.001
+# max_grad_norm: 1.0
+# gradient_accumulation_steps: 1

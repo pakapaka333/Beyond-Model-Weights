@@ -1,0 +1,21 @@
+# GSM8K with the protocol of dOPSD's evaluation script.
+entrypoint: run_lm_eval
+task: gsm8k
+num_fewshot: 0
+apply_chat_template: false
+model:
+  backend: llada
+  model_path: GSAI-ML/LLaDA-1.5
+  self_chat_template: true
+  prompt_prefix: ""
+  prompt_suffix: " Please reason step by step, and put your final answer within \\boxed{}."
+  gen_length: 256
+  steps: 256
+  block_length: 8
+  remasking: low_confidence
+  temperature: 0.0
+  threshold: null
+  use_cache: false
+  dual_cache: false
+  logits_eos_inf: false
+  confidence_eos_eot_inf: false

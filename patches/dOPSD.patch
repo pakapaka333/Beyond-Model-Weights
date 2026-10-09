@@ -1,0 +1,652 @@
+diff --git a/data_collator_dllm_trajectory.py b/data_collator_dllm_trajectory.py
+index 6998728..4ca2711 100644
+--- a/data_collator_dllm_trajectory.py
++++ b/data_collator_dllm_trajectory.py
+@@ -1,7 +1,13 @@
++import sys
++from pathlib import Path
++
+ import torch
+ 
+ from data_collator_dllm import SelfDistillationDLLMDataCollator
+ 
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
++from openbbq_fairness import group_tensors  # noqa: E402
++
+ 
+ class SelfDistillationDLLMTrajectoryDataCollator(SelfDistillationDLLMDataCollator):
+     """Collator for trajectory-OPSD (see opsd_dllm_trajectory_trainer.py).
+@@ -43,6 +49,7 @@ class SelfDistillationDLLMTrajectoryDataCollator(SelfDistillationDLLMDataCollato
+         target_field: str | None = None,
+         decode_intro_prompt: str | None = "",
+         transition_prompt: str | None = "",
++        fair_groups=None,
+     ):
+         super().__init__(
+             tokenizer=tokenizer,
+@@ -52,6 +59,7 @@ class SelfDistillationDLLMTrajectoryDataCollator(SelfDistillationDLLMDataCollato
+             solution_field=solution_field,
+         )
+         self.target_field = target_field
++        self.fair_groups = fair_groups
+         # "" (default) = OFF; None = use the DEFAULT_* template; any string = that text.
+         self.decode_intro_prompt = (
+             self.DEFAULT_DECODE_INTRO_PROMPT if decode_intro_prompt is None else decode_intro_prompt
+@@ -116,4 +124,10 @@ class SelfDistillationDLLMTrajectoryDataCollator(SelfDistillationDLLMDataCollato
+                     mask[i, : len(x)] = 1
+             result["target_input_ids"] = ids
+             result["target_attention_mask"] = mask
++
++        if self.fair_groups is not None:
++            ids, gmask, tmask = group_tensors(features, self.fair_groups)
++            result["fair_token_ids"] = ids
++            result["fair_group_mask"] = gmask
++            result["fair_term_mask"] = tmask
+         return result
+diff --git a/opsd_dllm_trajectory_train.py b/opsd_dllm_trajectory_train.py
+index c2f54fc..34b7abb 100644
+--- a/opsd_dllm_trajectory_train.py
++++ b/opsd_dllm_trajectory_train.py
+@@ -5,6 +5,7 @@ decoding step and the teacher's privileged info is the concrete final rollout.
+ """
+ 
+ import os
++import sys
+ from dataclasses import dataclass, field
+ from pathlib import Path
+ 
+@@ -12,7 +13,7 @@ import torch
+ import wandb
+ 
+ from datasets import load_dataset
+-from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
++from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer, set_seed
+ 
+ from trl import (
+     ModelConfig,
+@@ -27,6 +28,10 @@ from trl.experimental.gold import GOLDConfig
+ from data_collator_dllm_trajectory import SelfDistillationDLLMTrajectoryDataCollator
+ from opsd_dllm_trajectory_trainer import OPSDDLLMTrajectoryTrainer
+ 
++_REPO_ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(_REPO_ROOT / "src"))
++from openbbq_fairness import FAIR_COLUMNS, FAIR_TERMS, build_fair_groups  # noqa: E402
++
+ 
+ os.environ.setdefault("TRACKIO_SPACE_ID", "trl-trackio")
+ 
+@@ -39,6 +44,13 @@ DATASET_REGISTRY = {
+         "solution_field": "answer",
+         "target_field": "target",  # clean final answer used to verify rollouts
+     },
++    # Built by src/build_openbbq.py.
++    "openbbq_train_10k": {
++        "id": str(_REPO_ROOT / "data" / "openbbq" / "train-10k"),
++        "problem_field": "problem",
++        "solution_field": "solution",
++        "target_field": "target",
++    },
+ }
+ DEFAULT_DATASET = "mixchain"
+ BASELINE_PROBLEM_FIELD = "problem"
+@@ -116,6 +128,13 @@ class CustomScriptArguments(ScriptArguments):
+             "gains extra context but positions still masked at k+n stay predictive."
+         },
+     )
++    answer_match: str = field(
++        default="math",
++        metadata={
++            "help": "How rollouts are verified. 'math' = math_verify equivalence. "
++            "'exact_boxed' = the last \\boxed{} must equal the gold string; no box is wrong."
++        },
++    )
+     filter_wrong_rollouts: bool = field(
+         default=True,
+         metadata={
+@@ -210,6 +229,21 @@ class CustomScriptArguments(ScriptArguments):
+         default=0.0,
+         metadata={"help": "Temperature for the Dream sampler scoring fn (0 = greedy ordering)."},
+     )
++    fair_term: str = field(
++        default="",
++        metadata={
++            "help": "Fairness term added to the loss: '' (none), 'log_ratio', 'js_div' or "
++            "'logprob_var'. Applied at the scored positions of ambiguous rows."
++        },
++    )
++    fair_coef: float = field(default=1.0, metadata={"help": "Weight of the fairness term."})
++    fair_lexicon: str = field(
++        default="",
++        metadata={
++            "help": "Lexicon built by src/build_bias_lexicon.py (path relative to the repo "
++            "root). '' = equalize only each row's own option pair."
++        },
++    )
+     run_config: str = field(
+         default=None,
+         metadata={"help": "Suffix for output_dir and W&B run name."},
+@@ -310,6 +344,10 @@ if __name__ == "__main__":
+                 "gen_top_p": script_args.gen_top_p,
+                 "gen_alg": script_args.gen_alg,
+                 "gen_alg_temp": script_args.gen_alg_temp,
++                "answer_match": script_args.answer_match,
++                "fair_term": script_args.fair_term,
++                "fair_coef": script_args.fair_coef,
++                "fair_lexicon": script_args.fair_lexicon,
+             },
+         )
+ 
+@@ -382,6 +420,20 @@ if __name__ == "__main__":
+         if src_target != BASELINE_TARGET_FIELD:
+             rename_map[src_target] = BASELINE_TARGET_FIELD
+         keep_cols.append(BASELINE_TARGET_FIELD)
++    fair_groups = None
++    if script_args.fair_term:
++        if script_args.fair_term not in FAIR_TERMS:
++            raise ValueError(f"--fair_term must be one of {FAIR_TERMS}, got {script_args.fair_term!r}.")
++        missing_fair = [c for c in FAIR_COLUMNS if c not in train_dataset.column_names]
++        if missing_fair:
++            raise ValueError(f"--fair_term needs column(s) {missing_fair} in the dataset.")
++        keep_cols.extend(FAIR_COLUMNS)
++        lexicon = script_args.fair_lexicon
++        if lexicon and not os.path.isabs(lexicon):
++            lexicon = str(_REPO_ROOT / lexicon)
++        fair_groups = build_fair_groups(tokenizer, lexicon or None)
++    elif script_args.fair_lexicon:
++        raise ValueError("--fair_lexicon needs --fair_term.")
+     train_dataset = train_dataset.rename_columns(rename_map)
+     train_dataset = train_dataset.select_columns(keep_cols)
+     print(f"[opsd_dllm_trajectory_train] Columns -> {train_dataset.column_names}")
+@@ -400,8 +452,10 @@ if __name__ == "__main__":
+         target_field=BASELINE_TARGET_FIELD if has_target else None,
+         decode_intro_prompt=script_args.decode_intro_prompt,
+         transition_prompt=script_args.transition_prompt,
++        fair_groups=fair_groups,
+     )
+ 
++    set_seed(training_args.seed)  # the trainer builds the LoRA weights before it seeds
+     trainer = OPSDDLLMTrajectoryTrainer(
+         model=model,
+         args=training_args,
+@@ -429,10 +483,13 @@ if __name__ == "__main__":
+         traj_teacher_view=script_args.traj_teacher_view,
+         traj_teacher_gap=(None if script_args.traj_teacher_gap < 0 else script_args.traj_teacher_gap),
+         filter_wrong_rollouts=script_args.filter_wrong_rollouts,
++        answer_match=script_args.answer_match,
+         use_grpo=script_args.use_grpo,
+         grpo_num_rollouts=script_args.grpo_num_rollouts,
+         grpo_coef=script_args.grpo_coef,
+         grpo_adv_eps=script_args.grpo_adv_eps,
++        fair_term=script_args.fair_term or None,
++        fair_coef=script_args.fair_coef,
+     )
+ 
+     trainer.train()
+diff --git a/opsd_dllm_trajectory_trainer.py b/opsd_dllm_trajectory_trainer.py
+index 6483301..b98255a 100644
+--- a/opsd_dllm_trajectory_trainer.py
++++ b/opsd_dllm_trajectory_trainer.py
+@@ -11,7 +11,9 @@ at step `k`. On-policy only; supports both Dream and LLaDA backends.
+ """
+ 
+ import re
++import sys
+ from contextlib import nullcontext
++from pathlib import Path
+ 
+ import torch
+ import torch.nn.functional as F
+@@ -21,6 +23,9 @@ from trl.models.utils import unwrap_model_for_generation
+ 
+ from opsd_dllm_trainer import OPSDDLLMTrainer
+ 
++sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
++from openbbq_fairness import FAIR_COLUMNS, FAIR_TERMS, fair_penalty_term  # noqa: E402
++
+ # Math-equivalence verifier (fractions/radicals/algebra — ~40% of MATH answers
+ # are non-integer so string matching is wrong). Optional: fall back to normalized
+ # string compare if not installed.
+@@ -48,10 +53,13 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+         traj_teacher_gap: int | None = None,
+         traj_teacher_view: str = "snapshot",
+         filter_wrong_rollouts: bool = True,
++        answer_match: str = "math",
+         use_grpo: bool = True,
+         grpo_num_rollouts: int = 8,
+         grpo_coef: float = 1.0,
+         grpo_adv_eps: float = 1e-4,
++        fair_term: str | None = None,
++        fair_coef: float = 1.0,
+         **kwargs,
+     ):
+         # Masking is driven from the trajectory, not `_sample_mask`; drop any
+@@ -78,6 +86,13 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+             raise ValueError(
+                 f"traj_teacher_view must be 'snapshot' or 'all_future', got {traj_teacher_view!r}."
+             )
++        if answer_match not in ("math", "exact_boxed"):
++            raise ValueError(f"answer_match must be 'math' or 'exact_boxed', got {answer_match!r}.")
++        if fair_term is not None and fair_term not in FAIR_TERMS:
++            raise ValueError(f"fair_term must be one of {FAIR_TERMS}, got {fair_term!r}.")
++        self.answer_match = answer_match
++        self.fair_term = fair_term
++        self.fair_coef = float(fair_coef)
+ 
+         self.traj_mask_threshold = float(traj_mask_threshold)
+         self.traj_step_select = traj_step_select
+@@ -110,7 +125,9 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+         )
+         if self.filter_wrong_rollouts:
+             verifier = (
+-                "math_verify (symbolic/numeric equivalence)"
++                "exact match on the last \\boxed{}"
++                if self.answer_match == "exact_boxed"
++                else "math_verify (symbolic/numeric equivalence)"
+                 if _HAS_MATH_VERIFY
+                 else "STRING-MATCH ONLY — math_verify NOT installed; ~40% of MATH answers "
+                 "are non-integer and will be mis-verified. `pip install math_verify` is "
+@@ -144,6 +161,14 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+                     "[OPSD-DLLM] WARNING: LLaDA sampler is greedy unless gen_temperature>0; with "
+                     "temperature>0 it now samples multinomially (required for group diversity)."
+                 )
++        if self.fair_term:
++            groups = getattr(self.data_collator, "fair_groups", None)
++            lex = getattr(groups, "lexicon", None)
++            print(
++                f"[OPSD-DLLM] fairness term {self.fair_term} x {self.fair_coef:g} at the scored "
++                "positions of ambiguous rows; groups = option pair"
++                + (f" + {lex.num_groups} lexicon groups ({lex.path})" if lex else "")
++            )
+         print()
+ 
+     def _set_signature_columns_if_needed(self):
+@@ -152,6 +177,10 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+         tf = getattr(self.data_collator, "target_field", None)
+         if tf and self._signature_columns is not None and tf not in self._signature_columns:
+             self._signature_columns.append(tf)
++        if getattr(self.data_collator, "fair_groups", None) is not None:
++            for column in FAIR_COLUMNS:
++                if self._signature_columns is not None and column not in self._signature_columns:
++                    self._signature_columns.append(column)
+ 
+     def _generate_student_completion_with_history(self, model, prompt_ids, prompt_mask):
+         """On-policy rollout that also returns the per-step denoising history.
+@@ -538,6 +567,9 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+         """
+         if gold is None or pred is None:
+             return False
++        if self.answer_match == "exact_boxed":
++            m = re.match(r"\A\W*([0-9])(?![0-9])", pred.strip())
++            return m is not None and m.group(1) == gold.strip()
+         gold_n = self._preprocess_for_parse(gold)
+         pred_n = self._preprocess_for_parse(pred)
+         if _HAS_MATH_VERIFY:
+@@ -560,6 +592,8 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+         math_verify) keep the substring after a trailing answer marker.
+         """
+         boxed = self._extract_boxed_answer(completion_text)
++        if self.answer_match == "exact_boxed":
++            return boxed
+         if boxed is not None:
+             return boxed
+         if _HAS_MATH_VERIFY:
+@@ -722,6 +756,13 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+             target_mask = target_mask.repeat_interleave(G, 0) if target_mask is not None else None
+             answer_ids = answer_ids.repeat_interleave(G, 0) if answer_ids is not None else None
+             answer_mask = answer_mask.repeat_interleave(G, 0) if answer_mask is not None else None
++        fair_ids = inputs.get("fair_token_ids")
++        fair_mask = inputs.get("fair_group_mask")
++        fair_terms = inputs.get("fair_term_mask")
++        if G > 1 and fair_ids is not None:
++            fair_ids = fair_ids.repeat_interleave(G, 0)
++            fair_mask = fair_mask.repeat_interleave(G, 0)
++            fair_terms = fair_terms.repeat_interleave(G, 0)
+         # Verify when GRPO needs the reward or the JSD filter needs correctness.
+         need_verify = (self.use_grpo or self.filter_wrong_rollouts) and (
+             target_ids is not None or answer_ids is not None
+@@ -804,8 +845,16 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+             per_token_jsd = student_masked.new_zeros(0)
+             jsd_loss = student_completion_logits.sum() * 0.0
+ 
+-        # 7. Combined objective: JSD anchor (coef 1) + grpo_coef * GRPO.
++        # 7. Combined objective: JSD anchor (coef 1) + fair_coef * fairness + grpo_coef * GRPO.
+         loss = jsd_loss
++        fair_loss = None
++        if self.fair_term and fair_ids is not None and bool(scored_mask.any()):
++            fair_rows = scored_mask.nonzero(as_tuple=False)[:, 0]
++            fair_loss = fair_penalty_term(
++                student_completion_logits[scored_mask].float(),
++                fair_rows, fair_ids, fair_mask, fair_terms, term=self.fair_term,
++            )
++            loss = loss + self.fair_coef * fair_loss
+         if grpo_loss is not None:
+             loss = loss + self.grpo_coef * grpo_loss
+ 
+@@ -831,6 +880,8 @@ class OPSDDLLMTrajectoryTrainer(OPSDDLLMTrainer):
+             self._metrics[mode]["frac_rollout_correct"].append(1.0 - n_wrong_g / max(1.0, n_total_g))
+             self._metrics[mode]["num_scored_tokens"].append(float(scored_mask.sum().item()))
+             self._metrics[mode]["jsd_loss"].append(float(jsd_loss.detach().item()))
++            if fair_loss is not None:
++                self._metrics[mode]["fair_loss"].append(float(fair_loss.detach().item()))
+             if grpo_loss is not None:
+                 self._metrics[mode]["grpo_loss"].append(float(grpo_loss.detach().item()))
+                 self._metrics[mode]["advantage_abs_mean"].append(float(advantage.abs().mean().item()))
+diff --git a/sft_train_dllm.py b/sft_train_dllm.py
+index 7ff2b22..a5e0b1f 100644
+--- a/sft_train_dllm.py
++++ b/sft_train_dllm.py
+@@ -1,4 +1,4 @@
+-"""Entry point: vanilla SFT training for diffusion LLMs (e.g. Dream-7B).
++"""Entry point: vanilla SFT training for diffusion LLMs (Dream-7B or LLaDA-8B).
+ 
+ LLaDA-style masked-token objective: per example sample mask rate t ~ U[eps, 1],
+ mask each answer token i.i.d. with prob t, bidirectional forward over
+@@ -7,6 +7,8 @@ diffusion ELBO importance weight). Prompt and right-pad tokens are never masked.
+ """
+ 
+ import os
++import sys
++from collections import defaultdict
+ from dataclasses import dataclass, field
+ from pathlib import Path
+ 
+@@ -15,7 +17,7 @@ import torch.nn.functional as F
+ import wandb
+ 
+ from datasets import load_dataset
+-from transformers import AutoModel, AutoTokenizer, Trainer
++from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer, Trainer, set_seed
+ 
+ from trl import (
+     ModelConfig,
+@@ -28,6 +30,16 @@ from trl import (
+ )
+ 
+ 
++_REPO_ROOT = Path(__file__).resolve().parents[2]
++sys.path.insert(0, str(_REPO_ROOT / "src"))
++from openbbq_fairness import (  # noqa: E402
++    FAIR_COLUMNS,
++    FAIR_TERMS,
++    build_fair_groups,
++    fair_penalty_term,
++    group_tensors,
++)
++
+ os.environ.setdefault("TRACKIO_SPACE_ID", "trl-trackio")
+ 
+ 
+@@ -39,6 +51,12 @@ DATASET_REGISTRY = {
+         "problem_field": "question",
+         "solution_field": "answer",
+     },
++    # Built by src/build_openbbq.py; `solution` is the gold answer `\boxed{N}`.
++    "openbbq_train_10k": {
++        "id": str(_REPO_ROOT / "data" / "openbbq" / "train-10k"),
++        "problem_field": "problem",
++        "solution_field": "solution",
++    },
+ }
+ DEFAULT_DATASET = "mixchain"
+ # Canonical column names the collator consumes after the rename in main().
+@@ -56,6 +74,32 @@ class DLLMScriptArguments(ScriptArguments):
+             "(question -> problem, answer -> solution)."
+         },
+     )
++    fair_term: str = field(
++        default="",
++        metadata={
++            "help": "Fairness term added to the loss: '' (none), 'log_ratio', 'js_div' or "
++            "'logprob_var'. Applied at the masked answer positions of ambiguous rows."
++        },
++    )
++    fair_coef: float = field(default=1.0, metadata={"help": "Weight of the fairness term."})
++    fair_lexicon: str = field(
++        default="",
++        metadata={
++            "help": "Lexicon built by src/build_bias_lexicon.py (path relative to the repo "
++            "root). '' = equalize only each row's own option pair."
++        },
++    )
++    student_backend: str = field(
++        default="dream",
++        metadata={
++            "help": "'dream' (AutoModel, logits right-shifted) or 'llada' "
++            "(AutoModelForCausalLM, no shift), as in opsd_dllm_trainer.py."
++        },
++    )
++    eval_split_size: float = field(
++        default=0.01,
++        metadata={"help": "Fraction of the training split held out for evaluation; 0 = none."},
++    )
+     run_config: str = field(
+         default=None,
+         metadata={
+@@ -138,10 +182,12 @@ class SFTDLLMDataCollator:
+         tokenizer,
+         max_prompt_length: int = 1024,
+         max_answer_length: int = 1024,
++        fair_groups=None,
+     ):
+         self.tokenizer = tokenizer
+         self.max_prompt_length = max_prompt_length
+         self.max_answer_length = max_answer_length
++        self.fair_groups = fair_groups
+         if self.tokenizer.pad_token is None:
+             self.tokenizer.pad_token = self.tokenizer.eos_token
+ 
+@@ -190,12 +236,18 @@ class SFTDLLMDataCollator:
+             attention_mask[i, max_p:max_p + len(a)] = 1
+             answer_mask[i, max_p:max_p + len(a)] = 1  # non-pad answer tokens
+ 
+-        return {
++        batch_out = {
+             "input_ids": input_ids,
+             "attention_mask": attention_mask,
+             "answer_mask": answer_mask,
+             "labels": input_ids.clone(),  # placeholder; trainer overrides
+         }
++        if self.fair_groups is not None:
++            ids, gmask, tmask = group_tensors(features, self.fair_groups)
++            batch_out["fair_token_ids"] = ids
++            batch_out["fair_group_mask"] = gmask
++            batch_out["fair_term_mask"] = tmask
++        return batch_out
+ 
+ 
+ class SFTDLLMTrainer(Trainer):
+@@ -210,6 +262,9 @@ class SFTDLLMTrainer(Trainer):
+         fixed_mask_ratio: str = "0.75",
+         diffusion_min_t: float = 0.0,
+         diffusion_max_t: float = 1.0,
++        student_backend: str = "dream",
++        fair_term: str | None = None,
++        fair_coef: float = 1.0,
+         **kwargs,
+     ):
+         super().__init__(*args, **kwargs)
+@@ -217,6 +272,14 @@ class SFTDLLMTrainer(Trainer):
+             raise ValueError(
+                 f"mask_schedule must be 'diffusion' or 'fixed', got {mask_schedule!r}"
+             )
++        if student_backend not in ("dream", "llada"):
++            raise ValueError(f"student_backend must be 'dream' or 'llada', got {student_backend!r}")
++        if fair_term is not None and fair_term not in FAIR_TERMS:
++            raise ValueError(f"fair_term must be one of {FAIR_TERMS}, got {fair_term!r}.")
++        self.student_backend = student_backend
++        self.fair_term = fair_term
++        self.fair_coef = float(fair_coef)
++        self._metrics = {"train": defaultdict(list), "eval": defaultdict(list)}
+         self.mask_token_id = mask_token_id
+         self.sampling_eps = sampling_eps
+         self.mask_schedule = mask_schedule
+@@ -315,10 +378,21 @@ class SFTDLLMTrainer(Trainer):
+         return float(s)
+ 
+     def _forward(self, model, input_ids, attention_mask):
++        """Logits aligned so `out[:, i]` predicts token i, as in OPSDDLLMTrainer._forward."""
++        if self.student_backend == "llada":
++            with torch.amp.autocast("cuda", dtype=torch.bfloat16):
++                outputs = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=False)
++            return torch.nan_to_num(outputs.logits.float(), nan=0.0, posinf=1e4, neginf=-1e4)
++
+         # Dream passes attention_mask straight to SDPA, so expand (B,L) -> (B,1,1,L).
+         if attention_mask is not None and attention_mask.dim() == 2:
+             attention_mask = attention_mask[:, None, None, :].bool()
+-        return model(input_ids=input_ids, attention_mask=attention_mask)
++        with torch.amp.autocast("cuda", dtype=torch.bfloat16):
++            outputs = model(input_ids=input_ids, attention_mask=attention_mask)
++        # Dream convention: raw logits[i] predicts token[i+1]. Right-shift so
++        # logits[i] aligns with token[i]; without it the loss is off by one and
++        # the model becomes inconsistent with Dream's diffusion_generate.
++        return torch.cat([outputs.logits[:, :1], outputs.logits[:, :-1]], dim=1)
+ 
+     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+         input_ids = inputs["input_ids"]
+@@ -332,12 +406,7 @@ class SFTDLLMTrainer(Trainer):
+             input_ids,
+         )
+ 
+-        outputs = self._forward(model, noisy_input_ids, attention_mask)
+-        # Dream convention: raw logits[i] predicts token[i+1]. Right-shift so
+-        # logits[i] aligns with token[i]; without it the loss is off by one and
+-        # the model becomes inconsistent with Dream's diffusion_generate.
+-        logits = outputs.logits  # [B, L, V]
+-        logits = torch.cat([logits[:, :1], logits[:, :-1]], dim=1)
++        logits = self._forward(model, noisy_input_ids, attention_mask)  # [B, L, V]
+ 
+         # LLaDA ELBO: per example (1/t)*SUM CE over masked tokens, normalized by
+         # answer length (constant w.r.t. the mask), then batch-mean. Normalizing
+@@ -358,7 +427,24 @@ class SFTDLLMTrainer(Trainer):
+         has_answer = answer_lengths > 0
+         loss = per_ex_loss[has_answer].mean()
+ 
+-        return (loss, outputs) if return_outputs else loss
++        if self.fair_term and "fair_token_ids" in inputs:
++            fair_loss = fair_penalty_term(
++                flat_logits.float(), ex_idx, inputs["fair_token_ids"],
++                inputs["fair_group_mask"], inputs["fair_term_mask"], term=self.fair_term,
++            )
++            loss = loss + self.fair_coef * fair_loss
++            mode = "train" if self.model.training else "eval"
++            self._metrics[mode]["fair_loss"].append(float(fair_loss.detach().item()))
++
++        return (loss, logits) if return_outputs else loss
++
++    def log(self, logs: dict[str, float], start_time: float | None = None) -> None:
++        mode = "train" if self.model.training else "eval"
++        metrics = {k: sum(v) / len(v) for k, v in self._metrics[mode].items() if len(v) > 0}
++        if mode == "eval":
++            metrics = {f"eval_{k}": v for k, v in metrics.items()}
++        super().log({**logs, **metrics}, start_time)
++        self._metrics[mode].clear()
+ 
+ 
+ def _resolve_dtype(model_args):
+@@ -412,8 +498,8 @@ if __name__ == "__main__":
+     script_args, training_args, model_args = parser.parse_args_and_config()
+ 
+     # Dream is a diffusion LM; use the generic PEFT wrapper so attribute access
+-    # (e.g. diffusion_generate) delegates to the base model.
+-    model_args.lora_task_type = None
++    # (e.g. diffusion_generate) delegates to the base model. LLaDA loads as a CausalLM.
++    model_args.lora_task_type = "CAUSAL_LM" if script_args.student_backend == "llada" else None
+ 
+     # WandB Run Name
+     model_name = model_args.model_name_or_path.split("/")[-1]
+@@ -426,7 +512,8 @@ if __name__ == "__main__":
+     )
+     full_wandb_run_name = (
+         script_args.run_config
+-        or f"SFT_DLLM_{model_name}_lr{lr_str}_bs{effective_batch_size}_ep{training_args.num_train_epochs}"
++        or f"SFT_DLLM_{script_args.student_backend}_{model_name}_lr{lr_str}"
++        f"_bs{effective_batch_size}_ep{training_args.num_train_epochs}"
+     )
+     if script_args.run_config and not training_args.output_dir.endswith(script_args.run_config):
+         training_args.output_dir = str(Path(training_args.output_dir) / script_args.run_config)
+@@ -451,7 +538,12 @@ if __name__ == "__main__":
+         "lora_alpha": model_args.lora_alpha if model_args.use_peft else None,
+         "gradient_checkpointing": training_args.gradient_checkpointing,
+         "num_processes": num_processes,
++        "student_backend": script_args.student_backend,
++        "eval_split_size": script_args.eval_split_size,
+         "trainer": "SFTDLLMTrainer",
++        "fair_term": script_args.fair_term,
++        "fair_coef": script_args.fair_coef,
++        "fair_lexicon": script_args.fair_lexicon,
+     }
+     init_wandb_or_disable(script_args, training_args, full_wandb_run_name, wandb_config)
+     training_args.remove_unused_columns = False
+@@ -486,11 +578,12 @@ if __name__ == "__main__":
+         model_kwargs["device_map"] = get_kbit_device_map()
+         model_kwargs["quantization_config"] = quantization_config
+ 
++    model_cls = AutoModelForCausalLM if script_args.student_backend == "llada" else AutoModel
+     try:
+-        model = AutoModel.from_pretrained(model_args.model_name_or_path, **model_kwargs)
++        model = model_cls.from_pretrained(model_args.model_name_or_path, **model_kwargs)
+     except TypeError:
+         model_kwargs["torch_dtype"] = model_kwargs.pop("dtype")
+-        model = AutoModel.from_pretrained(model_args.model_name_or_path, **model_kwargs)
++        model = model_cls.from_pretrained(model_args.model_name_or_path, **model_kwargs)
+ 
+     if training_args.gradient_checkpointing:
+         # use_reentrant=False required for PEFT/LoRA.
+@@ -522,22 +615,43 @@ if __name__ == "__main__":
+     train_dataset = train_dataset.rename_columns(
+         {src_problem: PROBLEM_FIELD, src_solution: SOLUTION_FIELD}
+     )
+-    train_dataset = train_dataset.select_columns([PROBLEM_FIELD, SOLUTION_FIELD])
+-    split_dataset = train_dataset.train_test_split(test_size=0.01, seed=42)
+-    train_dataset = split_dataset["train"]
+-    eval_dataset = split_dataset["test"]
++    keep = [PROBLEM_FIELD, SOLUTION_FIELD]
++    fair_groups = None
++    if script_args.fair_term:
++        if script_args.fair_term not in FAIR_TERMS:
++            raise ValueError(f"--fair_term must be one of {FAIR_TERMS}, got {script_args.fair_term!r}.")
++        missing_fair = [c for c in FAIR_COLUMNS if c not in train_dataset.column_names]
++        if missing_fair:
++            raise ValueError(f"--fair_term needs column(s) {missing_fair} in the dataset.")
++        keep += list(FAIR_COLUMNS)
++        lexicon = script_args.fair_lexicon
++        if lexicon and not os.path.isabs(lexicon):
++            lexicon = str(_REPO_ROOT / lexicon)
++        fair_groups = build_fair_groups(tokenizer, lexicon or None)
++    elif script_args.fair_lexicon:
++        raise ValueError("--fair_lexicon needs --fair_term.")
++    train_dataset = train_dataset.select_columns(keep)
++    if script_args.eval_split_size > 0:
++        split_dataset = train_dataset.train_test_split(
++            test_size=script_args.eval_split_size, seed=42
++        )
++        train_dataset, eval_dataset = split_dataset["train"], split_dataset["test"]
++    else:
++        eval_dataset = None
+ 
+     # Collator
+     data_collator = SFTDLLMDataCollator(
+         tokenizer=tokenizer,
+         max_prompt_length=script_args.max_prompt_length,
+         max_answer_length=script_args.max_answer_length,
++        fair_groups=fair_groups,
+     )
+ 
+     # Training
+     peft_config = get_peft_config(model_args)
+     if peft_config is not None:
+         from peft import get_peft_model
++        set_seed(training_args.seed)  # the Trainer seeds only after the LoRA weights exist
+         model = get_peft_model(model, peft_config)
+ 
+     trainer = SFTDLLMTrainer(
+@@ -553,6 +667,9 @@ if __name__ == "__main__":
+         fixed_mask_ratio=script_args.fixed_mask_ratio,
+         diffusion_min_t=script_args.diffusion_min_t,
+         diffusion_max_t=script_args.diffusion_max_t,
++        student_backend=script_args.student_backend,
++        fair_term=script_args.fair_term or None,
++        fair_coef=script_args.fair_coef,
+     )
+ 
+     trainer.train()

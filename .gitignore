@@ -1,0 +1,16 @@
+# Local environment and secrets
+.env
+.venv/
+__pycache__/
+*.py[cod]
+
+# Downloaded or generated data
+data/openbbq/
+data/lexicon/
+data/corpus_stats/
+third_party/dream/
+
+# Training outputs and evaluation results
+outputs/
+results/
+wandb/

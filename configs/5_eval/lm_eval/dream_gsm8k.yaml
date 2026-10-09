@@ -1,0 +1,19 @@
+# GSM8K with the protocol of dOPSD's evaluation script.
+entrypoint: run_lm_eval
+task: gsm8k
+num_fewshot: 0
+apply_chat_template: false
+model:
+  backend: dream
+  model_path: Dream-org/Dream-v0-Instruct-7B
+  self_chat_template: true
+  prompt_prefix: ""
+  prompt_suffix: " Please reason step by step, and put your final answer within \\boxed{}."
+  max_new_tokens: 256
+  diffusion_steps: 256
+  temperature: 0.1
+  top_p: 0.9
+  alg: entropy
+  alg_temp: 0.0
+  dtype: bfloat16
+  batch_size: 8

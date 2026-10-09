@@ -1,0 +1,15 @@
+entrypoint: run_lm_eval
+task: ifeval
+num_fewshot: 0
+apply_chat_template: true
+model:
+  backend: dream
+  model_path: Dream-org/Dream-v0-Instruct-7B
+  max_new_tokens: 256
+  diffusion_steps: 256
+  temperature: 0.1
+  top_p: 0.9
+  alg: entropy
+  alg_temp: 0.0
+  dtype: bfloat16
+  batch_size: 8

@@ -1,0 +1,15 @@
+entrypoint: run_lm_eval
+task: ifeval
+num_fewshot: 0
+apply_chat_template: true
+model:
+  backend: llada
+  model_path: GSAI-ML/LLaDA-1.5
+  gen_length: 256
+  steps: 256
+  block_length: 32
+  remasking: low_confidence
+  temperature: 0.0
+  cfg_scale: 0.0
+  logits_eos_inf: false
+  confidence_eos_eot_inf: true

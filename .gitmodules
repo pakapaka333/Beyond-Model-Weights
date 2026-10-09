@@ -1,0 +1,3 @@
+[submodule "third_party/dOPSD"]
+	path = third_party/dOPSD
+	url = https://github.com/tuandattt/dOPSD.git

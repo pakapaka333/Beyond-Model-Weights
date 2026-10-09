@@ -1,0 +1,53 @@
+# Dream-v0-Instruct-7B: dOPSD + log-prob. var.
+model_name_or_path: Dream-org/Dream-v0-Instruct-7B
+mask_token_id: 151666
+torch_dtype: bfloat16
+attn_implementation: sdpa
+gradient_checkpointing: false
+use_peft: true
+lora_r: 32
+lora_dropout: 0.0
+lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+dataset: openbbq_train_10k
+max_prompt_length: 256
+max_answer_length: 64
+
+answer_match: exact_boxed
+filter_wrong_rollouts: false
+use_grpo: false
+fixed_teacher: true
+beta: 0.0
+temperature: 1.0
+traj_step_select: random
+traj_teacher_view: all_future
+gen_temperature: 1.0
+gen_alg_temp: 0.5
+
+fair_term: logprob_var
+fair_coef: 1.0
+fair_lexicon: data/lexicon/dream/regrouped/lexicon.json
+
+output_dir: ../../outputs
+run_config: dream/dopsd_logprob_var
+learning_rate: 4.0e-5
+per_device_train_batch_size: 4
+max_steps: 938
+seed: 1234
+logging_steps: 2
+save_steps: 100
+wandb_project: beyond-model-weights
+
+# Settings left at dOPSD's defaults, listed for reference:
+# student_backend: dream
+# lora_alpha: 32
+# sampling_eps: 0.001
+# jsd_token_clip: 0.0
+# traj_mask_threshold: 0.5
+# traj_teacher_gap: -1
+# gen_max_new_tokens: 256
+# gen_steps: 256
+# gen_top_p: 0.95
+# gen_alg: entropy
+# max_grad_norm: 1.0
+# gradient_accumulation_steps: 1

@@ -1,0 +1,17 @@
+# Result directories of scripts/5_eval.sh, written with e.g. OUTPUT_DIR=results/openbbq/llada/base. Paths are relative to the repo root.
+base:
+  openbbq: results/openbbq/llada/base
+  gsm8k: results/lm_eval/llada_gsm8k/base
+  ifeval: results/lm_eval/llada_ifeval/base
+  mmlu: results/lm_eval/llada_mmlu/base
+models:
+  - name: SFT
+    openbbq: results/openbbq/llada/sft
+    gsm8k: results/lm_eval/llada_gsm8k/sft
+    ifeval: results/lm_eval/llada_ifeval/sft
+    mmlu: results/lm_eval/llada_mmlu/sft
+  - name: dOPSD + log-prob. var.
+    openbbq: results/openbbq/llada/dopsd_logprob_var
+    gsm8k: results/lm_eval/llada_gsm8k/dopsd_logprob_var
+    ifeval: results/lm_eval/llada_ifeval/dopsd_logprob_var
+    mmlu: results/lm_eval/llada_mmlu/dopsd_logprob_var

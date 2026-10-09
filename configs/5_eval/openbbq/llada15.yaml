@@ -1,0 +1,16 @@
+# OpenBBQ with LLaDA-1.5 at the default sampling configuration
+# (B = 32, TPS = 1, low-confidence remasking). Pass --adapter for a tuned model.
+entrypoint: eval_openbbq
+data: data/openbbq/test-10k/train.jsonl
+batch_size: 8
+model:
+  backend: llada
+  model_path: GSAI-ML/LLaDA-1.5
+  gen_length: 256
+  steps: 256
+  block_length: 32
+  remasking: low_confidence
+  temperature: 0.0
+  cfg_scale: 0.0
+  logits_eos_inf: false
+  confidence_eos_eot_inf: true
