@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models</title>
+<meta name="description" content="Interactive demo: with the weights fixed, the sampling configuration of a diffusion language model moves its measured social bias and changes which model looks least biased, before and after debiasing.">
+<link rel="canonical" href="https://pakapaka333.github.io/Beyond-Model-Weights/">
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<!-- OGP / Twitter Card -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models">
+<meta property="og:description" content="Same weights, different bias: explore how block length, remasking and tokens per step change the measured social bias of three diffusion LMs.">
+<meta property="og:url" content="https://pakapaka333.github.io/Beyond-Model-Weights/">
+<meta property="og:image" content="https://pakapaka333.github.io/Beyond-Model-Weights/assets/dlm_decoding.png">
+<meta property="og:locale" content="en_US">
+<meta property="og:locale:alternate" content="ja_JP">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models">
+<meta name="twitter:description" content="Same weights, different bias: the measured fairness of a diffusion LM depends on how you sample from it.">
+<meta name="twitter:image" content="https://pakapaka333.github.io/Beyond-Model-Weights/assets/dlm_decoding.png">
+<!-- Scholar -->
+<meta name="citation_title" content="Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models">
+<meta name="citation_author" content="Saito, Koshiro">
+<meta name="citation_author" content="Oba, Daisuke">
+<meta name="citation_author" content="Bollegala, Danushka">
+<meta name="citation_author" content="Okazaki, Naoaki">
+<meta name="citation_publication_date" content="2026">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "ScholarlyArticle",
+  "headline": "Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models",
+  "author": [
+    {"@type": "Person", "name": "Koshiro Saito", "url": "https://pakapaka333.github.io/en/"},
+    {"@type": "Person", "name": "Daisuke Oba"},
+    {"@type": "Person", "name": "Danushka Bollegala"},
+    {"@type": "Person", "name": "Naoaki Okazaki"}
+  ],
+  "datePublished": "2026",
+  "url": "https://pakapaka333.github.io/Beyond-Model-Weights/",
+  "codeRepository": "https://github.com/pakapaka333/Beyond-Model-Weights"
+}
+</script>
+<!-- Apply stored theme (same key as the main site) and language before render -->
+<script>
+  (function(){
+    var s=null, l=null;
+    try{s=localStorage.getItem('theme'); l=localStorage.getItem('lang');}catch(e){}
+    if(s!=='dark'&&s!=='light'){s=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';}
+    if(l!=='ja'&&l!=='en'){l='en';}
+    document.documentElement.setAttribute('data-theme',s);
+    document.documentElement.setAttribute('lang',l);
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Noto+Sans+JP:wght@300;400;500;700&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+
+<div class="fixed-controls">
+  <nav class="lang-switch" aria-label="Language">
+    <button type="button" class="lang-btn" data-lang="ja">JA</button>
+    <button type="button" class="lang-btn" data-lang="en">EN</button>
+  </nav>
+  <button class="theme-toggle" id="themeToggle" type="button" aria-label="Toggle theme">🌙</button>
+</div>
+
+<main class="page">
+
+  <!-- Hero -->
+  <header class="hero">
+    <a class="back-link" id="backLink" href="/en/" data-i18n="back">← Koshiro Saito</a>
+    <p class="kicker" data-i18n="kicker">Preprint · 2026</p>
+    <h1 class="title">Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models</h1>
+    <p class="authors">
+      <a href="/en/" id="authorLink">Koshiro Saito</a><sup>1</sup>,
+      Daisuke Oba<sup>1</sup>,
+      Danushka Bollegala<sup>2,3</sup>,
+      Naoaki Okazaki<sup>1,4,5</sup>
+    </p>
+    <p class="affils">
+      <sup>1</sup><span data-i18n="aff1">Institute of Science Tokyo</span> &nbsp;
+      <sup>2</sup><span data-i18n="aff2">University of Liverpool</span> &nbsp;
+      <sup>3</sup>Amazon &nbsp;
+      <sup>4</sup><span data-i18n="aff4">AIST</span> &nbsp;
+      <sup>5</sup><span data-i18n="aff5">NII LLMC</span>
+    </p>
+    <nav class="pills" aria-label="Paper links">
+      <span class="pill pill-soon" aria-disabled="true" data-i18n="pillArxiv">arXiv (coming soon)</span>
+      <a class="pill" href="https://github.com/pakapaka333/Beyond-Model-Weights" target="_blank" rel="noopener" data-i18n="pillCode">Code</a>
+      <a class="pill" href="#bibtex">BibTeX</a>
+    </nav>
+    <p class="hook" data-i18n="hook"></p>
+  </header>
+
+  <!-- TL;DR -->
+  <section class="block" id="tldr" aria-labelledby="tldr-h">
+    <h2 class="block-title" id="tldr-h" data-i18n="tldrH">TL;DR</h2>
+    <div class="findings">
+      <article class="finding"><span class="finding-n">1</span><div class="qa"><h3 class="q" data-i18n="f1q"></h3><p class="a" data-i18n="f1a"></p><p class="d" data-i18n="f1d"></p></div></article>
+      <article class="finding"><span class="finding-n">2</span><div class="qa"><h3 class="q" data-i18n="f2q"></h3><p class="a" data-i18n="f2a"></p><p class="d" data-i18n="f2d"></p></div></article>
+      <article class="finding"><span class="finding-n">3</span><div class="qa"><h3 class="q" data-i18n="f3q"></h3><p class="a" data-i18n="f3a"></p><p class="d" data-i18n="f3d"></p></div></article>
+    </div>
+  </section>
+
+  <!-- Preliminary -->
+  <section class="block" id="knobs" aria-labelledby="knobs-h">
+    <h2 class="block-title" id="knobs-h" data-i18n="prelimH"></h2>
+    <figure class="mech">
+      <div class="mech-img"><img src="assets/dlm_decoding.png" width="2200" height="880" data-i18n-alt="figAlt" alt="" loading="lazy"></div>
+      <figcaption class="src" data-i18n="srcFig1"></figcaption>
+    </figure>
+    <p class="lede prelim-lede" data-i18n="prelimLede"></p>
+    <dl class="knobs">
+      <div><dt data-i18n="kBt"></dt><dd data-i18n="kBd"></dd></div>
+      <div><dt data-i18n="kRt"></dt><dd data-i18n="kRd"></dd></div>
+      <div><dt data-i18n="kTt"></dt><dd data-i18n="kTd"></dd></div>
+    </dl>
+  </section>
+
+  <!-- Explorer -->
+  <section class="block explorer" id="explore" aria-labelledby="explore-h">
+    <h2 class="block-title" id="explore-h" data-i18n="exploreH"></h2>
+    <p class="lede"><span data-i18n="exploreLede"></span><span class="q-red" data-i18n="exploreQ"></span></p>
+
+    <div class="controls controls-grid" id="controls">
+      <div class="ctl c-state">
+        <span class="ctl-label" data-i18n="cState"></span>
+        <div class="ctl-row">
+          <div class="seg" role="radiogroup" data-i18n-aria="cState" data-key="state">
+            <button type="button" role="radio" data-val="base" data-i18n="base"></button>
+            <button type="button" role="radio" data-val="debiased" data-i18n="debiased"></button>
+          </div>
+          <select id="methodSel" class="sel" data-i18n-aria="cMethod"></select>
+        </div>
+      </div>
+      <div class="ctl c-metric">
+        <span class="ctl-label" data-i18n="cMetric"></span>
+        <div class="seg" role="radiogroup" data-i18n-aria="cMetric" data-key="metric">
+          <button type="button" role="radio" data-val="amb_bias" data-i18n="mAmb"></button>
+          <button type="button" role="radio" data-val="dis_bias" data-i18n="mDis"></button>
+        </div>
+      </div>
+      <div class="ctl c-rk">
+        <span class="ctl-label" data-i18n="cRemask"></span>
+        <div class="seg" role="radiogroup" data-i18n-aria="cRemask" data-key="rk">
+          <button type="button" role="radio" data-val="confidence" data-i18n="rkConf"></button>
+          <button type="button" role="radio" data-val="random" data-i18n="rkRand"></button>
+        </div>
+      </div>
+      <div class="ctl c-b">
+        <span class="ctl-label" data-i18n="cB"></span>
+        <div class="seg" role="radiogroup" data-i18n-aria="cB" data-key="B">
+          <button type="button" role="radio" data-val="8">8</button>
+          <button type="button" role="radio" data-val="32">32</button>
+          <button type="button" role="radio" data-val="128">128</button>
+        </div>
+      </div>
+      <div class="ctl c-tps">
+        <span class="ctl-label" data-i18n="cTPS"></span>
+        <div class="seg" role="radiogroup" data-i18n-aria="cTPS" data-key="TPS">
+          <button type="button" role="radio" data-val="1">1</button>
+          <button type="button" role="radio" data-val="2">2</button>
+          <button type="button" role="radio" data-val="4">4</button>
+          <button type="button" role="radio" data-val="8">8</button>
+        </div>
+      </div>
+      <button type="button" class="btn-sweep" id="sweepBtn" aria-pressed="false">▶ Sweep all 24</button>
+    </div>
+
+    <div class="viz-card">
+      <div class="duo">
+        <div class="podium-wrap">
+          <p class="viz-title pod-title"><span data-i18n="podH"></span> <span class="pod-sub" data-i18n="podHn"></span></p>
+          <div class="podium" id="podium" aria-live="polite"></div>
+          <p class="pod-cap" id="podCap"></p>
+        </div>
+        <div class="bars-wrap">
+          <div class="bfair" id="bfair" aria-hidden="true"><span class="bf-fair" data-i18n="fair"></span><span class="bf-biased" data-i18n="biased"></span></div>
+          <div class="bars" id="bars"></div>
+          <div class="axis" id="axis" aria-hidden="true"></div>
+        </div>
+      </div>
+      <details class="formula">
+        <summary data-i18n="bsS"></summary>
+        <div class="formula-card">
+          <div class="math-row">
+            <math display="block"><msub><mi>s</mi><mtext>dis</mtext></msub><mo>=</mo><mfrac><mrow><msub><mi>n</mi><mtext>bias</mtext></msub><mo>−</mo><msub><mi>n</mi><mtext>anti</mtext></msub></mrow><mrow><msub><mi>n</mi><mtext>bias</mtext></msub><mo>+</mo><msub><mi>n</mi><mtext>anti</mtext></msub></mrow></mfrac></math>
+            <math display="block"><msub><mi>s</mi><mtext>amb</mtext></msub><mo>=</mo><mfrac><mrow><msub><mi>n</mi><mtext>bias</mtext></msub><mo>−</mo><msub><mi>n</mi><mtext>anti</mtext></msub></mrow><mrow><msub><mi>n</mi><mtext>bias</mtext></msub><mo>+</mo><msub><mi>n</mi><mtext>anti</mtext></msub><mo>+</mo><msub><mi>n</mi><mtext>none</mtext></msub></mrow></mfrac></math>
+          </div>
+          <p data-i18n="bs1"></p>
+        </div>
+      </details>
+    </div>
+
+    <div class="controls controls-strip">
+      <label class="ctl ctl-inline"><span class="ctl-label" data-i18n="cModel"></span>
+        <select id="stripSel" class="sel" data-i18n-aria="stripBy"></select>
+      </label>
+    </div>
+    <div class="strip-card">
+      <div class="strip-head">
+        <p class="viz-title" data-i18n="stripH"></p>
+      </div>
+      <div class="strip" id="strip" role="grid"></div>
+      <div class="strip-legend" id="stripLegend"></div>
+      <p class="answer q-red" data-i18n="answer1"></p>
+      <p class="live" id="liveSentence" aria-live="polite"></p>
+    </div>
+    <p class="src" data-i18n="srcExplore"></p>
+  </section>
+
+  <!-- Ranges -->
+  <section class="block" id="ranges" aria-labelledby="ranges-h">
+    <h2 class="block-title" id="ranges-h" data-i18n="rangesH"></h2>
+    <p class="lede"><strong data-i18n="rangesLede1"></strong><span data-i18n="rangesLede2"></span></p>
+    <div class="controls controls-tight">
+      <label class="ctl ctl-inline">
+        <span class="ctl-label" data-i18n="cModel"></span>
+        <select id="rangeModelSel" class="sel" data-i18n-aria="cModel"></select>
+      </label>
+    </div>
+    <div class="viz-card">
+      <div class="range-legend" id="rangeLegend"></div>
+      <div class="rchart" id="rangeChart"></div>
+    </div>
+    <p class="src" id="rangeSrc"></p>
+  </section>
+
+  <!-- Utility -->
+  <section class="block" id="utility" aria-labelledby="utility-h">
+    <h2 class="block-title" id="utility-h" data-i18n="utilH"></h2>
+    <p class="lede"><strong data-i18n="utilLeadB"></strong><span data-i18n="utilLede"></span></p>
+    <div class="viz-card">
+      <div class="sc-legend" id="scLegend"></div>
+      <div class="sc-grid" id="scGrid"></div>
+    </div>
+    <p class="src" data-i18n="utilCap"></p>
+  </section>
+
+  <!-- BibTeX -->
+  <section class="block" id="bibtex" aria-labelledby="bibtex-h">
+    <div class="bib-head">
+      <h2 class="block-title" id="bibtex-h">BibTeX</h2>
+      <button type="button" class="copy-btn" id="copyBib" data-i18n="copy">Copy</button>
+    </div>
+    <div class="bib">
+<pre id="bibText">@misc{Saito:BeyondModelWeights:2026,
+  author        = {Koshiro Saito and Daisuke Oba and Danushka Bollegala and Naoaki Okazaki},
+  title         = {Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models},
+  eprint        = {coming soon},
+  howpublished  = {arXiv preprint (coming soon)},
+  primaryClass  = {cs.CL},
+  year          = {2026},
+}</pre>
+    </div>
+  </section>
+
+  <noscript>
+    <p class="lede">The interactive charts need JavaScript. Across 24 sampling configurations, the ambiguous-context bias of LLaDA-8B ranges from .095 to .153, LLaDA-1.5 from .111 to .157 and Dream-7B from .086 to .320, and five different orderings of the three models occur.</p>
+  </noscript>
+</main>
+
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<script src="demo.js"></script>
+</body>
+</html>
