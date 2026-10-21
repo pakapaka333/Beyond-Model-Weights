@@ -1,6 +1,6 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-green.svg"/></a>
-  <img src="https://img.shields.io/badge/arXiv-coming_soon-b31b1b.svg"/>
+  <a href="https://arxiv.org/abs/2610.27584"><img src="https://img.shields.io/badge/arXiv-2610.27584-b31b1b.svg"/></a>
   <a href="https://pakapaka333.github.io/Beyond-Model-Weights/"><img src="https://img.shields.io/badge/🎮_Demo-page-3AABD2.svg"/></a>
 </p>
 
@@ -188,8 +188,9 @@ If you find our code or work helpful, please cite:
 @misc{Saito:BeyondModelWeights:2026,
   author        = {Koshiro Saito and Daisuke Oba and Danushka Bollegala and Naoaki Okazaki},
   title         = {Beyond Model Weights: Sampling-Dependent Fairness in Diffusion Language Models},
-  eprint        = {coming soon},
-  howpublished  = {arXiv preprint (coming soon)},
+  eprint        = {2610.27584},
+  archivePrefix = {arXiv},
+  howpublished  = {arXiv:2610.27584},
   primaryClass  = {cs.CL},
   year          = {2026},
 }
