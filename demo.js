@@ -7,7 +7,7 @@
     en: {
       back: '← Back to Top', kicker: 'Preprint · 2026',
       aff1: 'Institute of Science Tokyo', aff2: 'University of Liverpool', aff4: 'AIST', aff5: 'NII LLMC',
-      pillArxiv: 'arXiv (coming soon)', pillCode: 'Code',
+      pillCode: 'Code',
       hook: 'Fairness in diffusion language models depends on how you sample.',
       tldrH: 'TL;DR',
       f1q: 'Do sampling configurations change a DLM’s social bias?',
@@ -69,7 +69,7 @@
     ja: {
       back: '← Topに戻る', kicker: 'プレプリント · 2026',
       aff1: '東京科学大学', aff2: 'リバプール大学', aff4: '産業技術総合研究所', aff5: '国立情報学研究所 LLMC',
-      pillArxiv: 'arXiv（近日公開）', pillCode: 'コード',
+      pillCode: 'コード',
       hook: 'Fairness in diffusion language models depends on how you sample.',
       tldrH: 'TL;DR',
       f1q: 'サンプリング設定は DLM の社会的バイアスを変える？',

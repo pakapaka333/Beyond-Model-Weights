@@ -79,8 +79,6 @@ math { font-size: 1.08em; color: var(--ink); }
 .pills { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 16px 0; }
 .pill { display: inline-flex; align-items: center; font-size: 13px; color: var(--accent); background: var(--accent-lt); border: 1px solid var(--accent-bd); border-radius: 20px; padding: 4px 16px; transition: background 0.13s, color 0.13s; }
 .pill:hover { background: var(--accent); color: #fff; text-decoration: none; }
-.pill-soon { cursor: default; opacity: 0.7; }
-.pill-soon:hover { background: var(--accent-lt); color: var(--accent); }
 .hook { font-family: 'DM Serif Display', Georgia, serif; font-style: italic; font-size: clamp(17px, 2.1vw, 19.5px); color: var(--ink); max-width: 760px; margin: 0 auto; line-height: 1.55; }
 
 /* ── Blocks ── */
